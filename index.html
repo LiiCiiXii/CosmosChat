@@ -260,6 +260,22 @@
             height: 20px;
             animation: spin 1s linear infinite;
         }
+
+        .call-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+
+        .incoming-call {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            animation: slideDown 0.5s ease-out;
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-indigo-950 via-purple-950 to-black min-h-screen overflow-hidden">
@@ -516,6 +532,7 @@
                 <div>
                     <h1 id="welcome-text" class="text-3xl font-bold text-white mb-1">Welcome back!</h1>
                     <p class="text-gray-300 text-lg">Ready to explore the cosmos?</p>
+                    <p id="user-cosmic-id" class="text-sm text-cyan-400 font-mono"></p>
                 </div>
             </div>
 
@@ -681,8 +698,9 @@
 
             <form id="add-friend-form" class="space-y-6">
                 <div>
-                    <label class="text-gray-200 text-lg font-medium">Friend's Cosmic ID or Username</label>
-                    <input type="text" id="friend-identifier" placeholder="Enter ID or username" required class="w-full input-cosmic border border-purple-500/30 text-white placeholder-gray-400 focus:border-cyan-400 rounded-xl px-6 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400/50 mt-2">
+                    <label class="text-gray-200 text-lg font-medium">Friend's Cosmic ID</label>
+                    <input type="text" id="friend-identifier" placeholder="Enter their Cosmic ID (e.g., cosmic_abc123def456)" required class="w-full input-cosmic border border-purple-500/30 text-white placeholder-gray-400 focus:border-cyan-400 rounded-xl px-6 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-cyan-400/50 mt-2">
+                    <p class="text-gray-400 text-sm mt-2">Ask your friend to share their Cosmic ID from their profile</p>
                 </div>
 
                 <button type="submit" class="w-full btn-primary text-white font-bold py-4 text-lg rounded-xl shadow-2xl">
@@ -820,6 +838,1272 @@
         </div>
     </div>
 
-    <script src="javascript.js"></script>
+    <!-- Incoming Call Notification -->
+    <div id="incoming-call" class="hidden incoming-call glass-effect rounded-2xl p-6 w-80">
+        <div class="flex items-center space-x-4 mb-4">
+            <div class="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-white font-bold">
+                F
+            </div>
+            <div>
+                <h3 class="text-white font-bold">Incoming Call</h3>
+                <p id="caller-name" class="text-gray-300">Friend</p>
+            </div>
+        </div>
+        <div class="flex space-x-3">
+            <button onclick="acceptCall()" class="flex-1 bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-bold">
+                Accept
+            </button>
+            <button onclick="declineCall()" class="flex-1 bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-bold">
+                Decline
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentUser = null
+        let friends = []
+        let currentChat = null
+        let messages = {}
+        let isInCall = false
+        let callTimer = null
+        let callStartTime = null
+        let localStream = null
+        let remoteStream = null
+        let registeredUsers = {}
+        let peerConnection = null
+
+        // Initialize the app
+        document.addEventListener("DOMContentLoaded", () => {
+            createStars()
+            loadRegisteredUsers()
+            checkAuthStatus()
+            setupEventListeners()
+            initializeAnimations()
+        })
+
+        // Create animated stars with enhanced effects
+        function createStars() {
+            const starsContainer = document.getElementById("stars-container")
+            for (let i = 0; i < 150; i++) {
+                const star = document.createElement("div")
+                star.className = "star"
+                const size = Math.random() * 4 + 1
+                star.style.width = size + "px"
+                star.style.height = size + "px"
+                star.style.left = Math.random() * 100 + "%"
+                star.style.top = Math.random() * 100 + "%"
+                star.style.animationDelay = Math.random() * 3 + "s"
+                star.style.animationDuration = 2 + Math.random() * 4 + "s"
+                starsContainer.appendChild(star)
+            }
+        }
+
+        // Load registered users from localStorage
+        function loadRegisteredUsers() {
+            const saved = localStorage.getItem("cosmosRegisteredUsers")
+            if (saved) {
+                registeredUsers = JSON.parse(saved)
+            }
+        }
+
+        // Save registered users to localStorage
+        function saveRegisteredUsers() {
+            localStorage.setItem("cosmosRegisteredUsers", JSON.stringify(registeredUsers))
+        }
+
+        // Initialize animations and effects
+        function initializeAnimations() {
+            document.body.style.transition = "all 0.3s ease"
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = "1"
+                        entry.target.style.transform = "translateY(0)"
+                    }
+                })
+            })
+
+            document.querySelectorAll(".card-hover").forEach((el) => {
+                el.style.opacity = "0"
+                el.style.transform = "translateY(20px)"
+                el.style.transition = "all 0.6s ease"
+                observer.observe(el)
+            })
+        }
+
+        // Enhanced event listeners
+        function setupEventListeners() {
+            document.getElementById("login-form").addEventListener("submit", handleLogin)
+            document.getElementById("signup-form").addEventListener("submit", handleSignup)
+            document.getElementById("profile-form").addEventListener("submit", handleProfileUpdate)
+            document.getElementById("add-friend-form").addEventListener("submit", handleAddFriend)
+
+            const messageInput = document.getElementById("message-input")
+            messageInput.addEventListener("keypress", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMessage()
+                }
+            })
+
+            messageInput.addEventListener("input", () => {
+                if (currentChat) {
+                    simulateTypingIndicator()
+                }
+            })
+
+            document.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") {
+                    hideAllModals()
+                }
+
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                    sendMessage()
+                }
+            })
+
+            document.addEventListener("click", (e) => {
+                if (e.target.classList.contains("modal-backdrop")) {
+                    hideAllModals()
+                }
+            })
+        }
+
+        // Enhanced authentication status check
+        function checkAuthStatus() {
+            showLoadingState()
+
+            setTimeout(() => {
+                const userData = localStorage.getItem("cosmosUser")
+                if (userData) {
+                    currentUser = JSON.parse(userData)
+                    // Verify user still exists in registered users
+                    if (registeredUsers[currentUser.email]) {
+                        loadUserData()
+                        showDashboard()
+                    } else {
+                        // User was deleted, logout
+                        logout()
+                    }
+                } else {
+                    showLanding()
+                }
+                hideLoadingState()
+            }, 1000)
+        }
+
+        // Loading states
+        function showLoadingState() {
+            const loader = document.createElement("div")
+            loader.id = "global-loader"
+            loader.className = "fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center"
+            loader.innerHTML = `
+                <div class="text-center">
+                    <div class="loading-spinner mx-auto mb-4"></div>
+                    <p class="text-white text-xl">Initializing Cosmos...</p>
+                </div>
+            `
+            document.body.appendChild(loader)
+        }
+
+        function hideLoadingState() {
+            const loader = document.getElementById("global-loader")
+            if (loader) {
+                loader.style.opacity = "0"
+                setTimeout(() => loader.remove(), 300)
+            }
+        }
+
+        // Enhanced navigation with smooth transitions
+        function showLanding() {
+            hideAllPages()
+            const landing = document.getElementById("landing-page")
+            landing.classList.remove("hidden")
+            landing.style.animation = "fadeIn 0.5s ease-out"
+        }
+
+        function showLogin() {
+            hideAllPages()
+            const login = document.getElementById("login-page")
+            login.classList.remove("hidden")
+            login.style.animation = "slideUp 0.5s ease-out"
+            document.getElementById("login-email").focus()
+        }
+
+        function showSignup() {
+            hideAllPages()
+            const signup = document.getElementById("signup-page")
+            signup.classList.remove("hidden")
+            signup.style.animation = "slideUp 0.5s ease-out"
+            document.getElementById("signup-username").focus()
+        }
+
+        function showDashboard() {
+            hideAllPages()
+            const dashboard = document.getElementById("dashboard")
+            dashboard.classList.remove("hidden")
+            dashboard.style.animation = "fadeIn 0.5s ease-out"
+            updateDashboard()
+        }
+
+        function showChat(friendId) {
+            hideAllPages()
+            const chat = document.getElementById("chat-interface")
+            chat.classList.remove("hidden")
+            chat.style.animation = "slideUp 0.5s ease-out"
+            loadChat(friendId)
+        }
+
+        function hideAllPages() {
+            const pages = ["landing-page", "login-page", "signup-page", "dashboard", "chat-interface"]
+            pages.forEach((page) => {
+                document.getElementById(page).classList.add("hidden")
+            })
+        }
+
+        function hideAllModals() {
+            const modals = ["profile-modal", "add-friend-modal", "video-call-overlay", "incoming-call"]
+            modals.forEach((modal) => {
+                const element = document.getElementById(modal)
+                if (!element.classList.contains("hidden")) {
+                    element.style.animation = "fadeOut 0.3s ease-out"
+                    setTimeout(() => element.classList.add("hidden"), 300)
+                }
+            })
+        }
+
+        // Enhanced authentication with proper validation
+        function handleLogin(e) {
+            e.preventDefault()
+
+            const email = document.getElementById("login-email").value.trim()
+            const password = document.getElementById("login-password").value
+
+            if (!validateEmail(email)) {
+                showNotification("Please enter a valid galactic email address", "error")
+                return
+            }
+
+            if (password.length < 6) {
+                showNotification("Secret code must be at least 6 characters", "error")
+                return
+            }
+
+            setButtonLoading(e.target.querySelector('button[type="submit"]'), true)
+
+            // Check if user exists and password matches
+            setTimeout(() => {
+                const registeredUser = registeredUsers[email]
+                
+                if (!registeredUser) {
+                    setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                    showNotification("No account found with this email. Please sign up first! 🚀", "error")
+                    return
+                }
+
+                if (registeredUser.password !== password) {
+                    setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                    showNotification("Incorrect secret code. Please try again! 🔐", "error")
+                    return
+                }
+
+                // Login successful
+                currentUser = {
+                    id: registeredUser.id,
+                    username: registeredUser.username,
+                    email: registeredUser.email,
+                    bio: registeredUser.bio,
+                    avatar: registeredUser.avatar,
+                    joinDate: registeredUser.joinDate,
+                    lastSeen: new Date().toISOString(),
+                }
+
+                localStorage.setItem("cosmosUser", JSON.stringify(currentUser))
+                loadUserData()
+
+                setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                showNotification("Welcome back to the cosmos! 🚀", "success")
+                showDashboard()
+            }, 2000)
+        }
+
+        function handleSignup(e) {
+            e.preventDefault()
+
+            const username = document.getElementById("signup-username").value.trim()
+            const email = document.getElementById("signup-email").value.trim()
+            const password = document.getElementById("signup-password").value
+
+            if (!validateUsername(username)) {
+                showNotification("Username must be 3-20 characters and contain only letters, numbers, and underscores", "error")
+                return
+            }
+
+            if (!validateEmail(email)) {
+                showNotification("Please enter a valid galactic email address", "error")
+                return
+            }
+
+            if (password.length < 6) {
+                showNotification("Secret code must be at least 6 characters", "error")
+                return
+            }
+
+            // Check if user already exists
+            if (registeredUsers[email]) {
+                showNotification("An account with this email already exists. Please login instead! 📧", "error")
+                return
+            }
+
+            setButtonLoading(e.target.querySelector('button[type="submit"]'), true)
+
+            setTimeout(() => {
+                const userId = generateUserId()
+                const userData = {
+                    id: userId,
+                    username: username,
+                    email: email,
+                    password: password, // In real app, this would be hashed
+                    bio: "New cosmic explorer! 🌟",
+                    avatar: null,
+                    joinDate: new Date().toISOString(),
+                    lastSeen: new Date().toISOString(),
+                }
+
+                // Register the user
+                registeredUsers[email] = userData
+                saveRegisteredUsers()
+
+                // Set as current user
+                currentUser = { ...userData }
+                delete currentUser.password // Don't store password in current session
+                localStorage.setItem("cosmosUser", JSON.stringify(currentUser))
+                loadUserData()
+
+                setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                showNotification(`Welcome to the cosmos, ${username}! 🌌`, "success")
+                showDashboard()
+            }, 2000)
+        }
+
+        function logout() {
+            if (confirm("Are you sure you want to leave the cosmos?")) {
+                localStorage.removeItem("cosmosUser")
+                localStorage.removeItem("cosmosFriends")
+                localStorage.removeItem("cosmosMessages")
+                currentUser = null
+                friends = []
+                messages = {}
+                showNotification("See you in the stars! ✨", "info")
+                showLanding()
+            }
+        }
+
+        // Enhanced validation functions
+        function validateEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+            return emailRegex.test(email)
+        }
+
+        function validateUsername(username) {
+            const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/
+            return usernameRegex.test(username)
+        }
+
+        // Enhanced user data management
+        function loadUserData() {
+            if (!currentUser) return
+
+            const savedFriends = localStorage.getItem("cosmosFriends")
+            if (savedFriends) {
+                friends = JSON.parse(savedFriends)
+                // Update friend statuses randomly for demo
+                friends.forEach((friend) => {
+                    friend.status = Math.random() > 0.3 ? "online" : "offline"
+                    friend.lastSeen = new Date(Date.now() - Math.random() * 86400000).toISOString()
+                })
+            }
+
+            const savedMessages = localStorage.getItem("cosmosMessages")
+            if (savedMessages) {
+                messages = JSON.parse(savedMessages)
+            }
+        }
+
+        function saveUserData() {
+            if (currentUser) {
+                currentUser.lastSeen = new Date().toISOString()
+                localStorage.setItem("cosmosUser", JSON.stringify(currentUser))
+            }
+            localStorage.setItem("cosmosFriends", JSON.stringify(friends))
+            localStorage.setItem("cosmosMessages", JSON.stringify(messages))
+        }
+
+        function generateUserId() {
+            return "cosmic_" + Math.random().toString(36).substr(2, 12)
+        }
+
+        // Enhanced dashboard with real-time updates
+        function updateDashboard() {
+            if (!currentUser) return
+
+            const hour = new Date().getHours()
+            let greeting = "Welcome back"
+            if (hour < 12) greeting = "Good morning"
+            else if (hour < 18) greeting = "Good afternoon"
+            else greeting = "Good evening"
+
+            document.getElementById("welcome-text").textContent = `${greeting}, ${currentUser.username}!`
+            document.getElementById("user-cosmic-id").textContent = `ID: ${currentUser.id}`
+
+            updateUserAvatar()
+            updateStatsWithAnimation()
+            updateFriendsList()
+        }
+
+        function updateUserAvatar() {
+            const avatar = document.getElementById("user-avatar")
+            if (currentUser.avatar) {
+                avatar.style.backgroundImage = `url(${currentUser.avatar})`
+                avatar.style.backgroundSize = "cover"
+                avatar.style.backgroundPosition = "center"
+                avatar.textContent = ""
+            } else {
+                avatar.style.backgroundImage = ""
+                avatar.textContent = currentUser.username.charAt(0).toUpperCase()
+            }
+        }
+
+        function updateStatsWithAnimation() {
+            const friendsCount = document.getElementById("friends-count")
+            const activeChatsCount = document.getElementById("active-chats-count")
+
+            animateNumber(friendsCount, friends.length)
+            animateNumber(activeChatsCount, Object.keys(messages).length)
+        }
+
+        function animateNumber(element, targetNumber) {
+            const currentNumber = parseInt(element.textContent) || 0
+            const increment = targetNumber > currentNumber ? 1 : -1
+            const duration = 1000
+            const steps = Math.abs(targetNumber - currentNumber)
+            const stepDuration = duration / steps
+
+            let current = currentNumber
+            const timer = setInterval(() => {
+                current += increment
+                element.textContent = current
+
+                if (current === targetNumber) {
+                    clearInterval(timer)
+                }
+            }, stepDuration)
+        }
+
+        // Enhanced friends list with better UI
+        function updateFriendsList() {
+            const friendsList = document.getElementById("friends-list")
+
+            if (friends.length === 0) {
+                friendsList.innerHTML = `
+                    <div class="text-center text-gray-400 py-16 animate-fade-in">
+                        <div class="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-purple-500/20 to-cyan-500/20 rounded-3xl flex items-center justify-center">
+                            <svg class="w-12 h-12 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">No cosmic friends yet</h3>
+                        <p class="text-lg">Start exploring the universe and connect with fellow space travelers!</p>
+                        <button onclick="showAddFriend()" class="mt-6 btn-primary text-white px-6 py-3 rounded-xl font-semibold">
+                            Add Your First Friend
+                        </button>
+                    </div>
+                `
+                return
+            }
+
+            friendsList.innerHTML = friends
+                .map((friend, index) => {
+                    const lastMessage = messages[friend.id] ? messages[friend.id][messages[friend.id].length - 1] : null
+                    const unreadCount = getUnreadCount(friend.id)
+                    const isOnline = friend.status === "online"
+                    const lastSeen = friend.lastSeen ? new Date(friend.lastSeen) : new Date()
+                    const timeAgo = getTimeAgo(lastSeen)
+
+                    return `
+                        <div onclick="showChat('${friend.id}')" 
+                             class="friend-item flex items-center justify-between p-6 rounded-2xl cursor-pointer mb-4 animate-fade-in"
+                             style="animation-delay: ${index * 0.1}s">
+                            <div class="flex items-center space-x-4">
+                                <div class="relative">
+                                    <div class="w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden">
+                                        ${friend.avatar ? `<img src="${friend.avatar}" class="w-full h-full object-cover">` : friend.username.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div class="absolute -bottom-1 -right-1 w-4 h-4 border-3 border-black rounded-full ${isOnline ? "status-online" : "status-offline"}"></div>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex items-center space-x-2">
+                                        <h3 class="font-bold text-white text-lg">${friend.username}</h3>
+                                        ${unreadCount > 0 ? `<span class="bg-cyan-500 text-white text-xs px-2 py-1 rounded-full font-bold">${unreadCount}</span>` : ""}
+                                    </div>
+                                    ${
+                                        lastMessage
+                                            ? `<p class="text-gray-400 truncate max-w-xs text-sm mt-1">${lastMessage.type === "text" ? lastMessage.text : "📷 Shared an image"}</p>`
+                                            : `<p class="text-gray-500 text-sm mt-1">No messages yet</p>`
+                                    }
+                                    <p class="text-xs text-gray-500 mt-1">${isOnline ? "Online now" : `Last seen ${timeAgo}`}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-center space-x-3">
+                                <span class="text-xs px-3 py-1 rounded-full font-medium ${isOnline ? "bg-green-500/20 text-green-300 border border-green-500/30" : "bg-gray-500/20 text-gray-400 border border-gray-500/30"}">${friend.status}</span>
+                                <svg class="w-5 h-5 text-purple-400 group-hover:text-cyan-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                                </svg>
+                            </div>
+                        </div>
+                    `
+                })
+                .join("")
+        }
+
+        function getUnreadCount(friendId) {
+            if (!messages[friendId]) return 0
+            return messages[friendId].filter((msg) => !msg.read && msg.sender === "friend").length
+        }
+
+        function getTimeAgo(date) {
+            const now = new Date()
+            const diffInSeconds = Math.floor((now - date) / 1000)
+
+            if (diffInSeconds < 60) return "just now"
+            if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`
+            if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`
+            return `${Math.floor(diffInSeconds / 86400)}d ago`
+        }
+
+        // Enhanced profile management
+        function showProfile() {
+            document.getElementById("profile-modal").classList.remove("hidden")
+            document.getElementById("profile-modal").style.animation = "fadeIn 0.3s ease-out"
+
+            document.getElementById("profile-username").value = currentUser.username
+            document.getElementById("profile-bio").value = currentUser.bio || ""
+            document.getElementById("profile-id").value = currentUser.id
+
+            updateProfileAvatar()
+        }
+
+        function hideProfile() {
+            const modal = document.getElementById("profile-modal")
+            modal.style.animation = "fadeOut 0.3s ease-out"
+            setTimeout(() => modal.classList.add("hidden"), 300)
+        }
+
+        function updateProfileAvatar() {
+            const profileAvatar = document.getElementById("profile-avatar")
+            if (currentUser.avatar) {
+                profileAvatar.style.backgroundImage = `url(${currentUser.avatar})`
+                profileAvatar.style.backgroundSize = "cover"
+                profileAvatar.style.backgroundPosition = "center"
+                profileAvatar.textContent = ""
+            } else {
+                profileAvatar.style.backgroundImage = ""
+                profileAvatar.textContent = currentUser.username.charAt(0).toUpperCase()
+            }
+        }
+
+        function handleProfileUpdate(e) {
+            e.preventDefault()
+
+            const newUsername = document.getElementById("profile-username").value.trim()
+            const newBio = document.getElementById("profile-bio").value.trim()
+
+            if (!validateUsername(newUsername)) {
+                showNotification("Username must be 3-20 characters and contain only letters, numbers, and underscores", "error")
+                return
+            }
+
+            setButtonLoading(e.target.querySelector('button[type="submit"]'), true)
+
+            setTimeout(() => {
+                currentUser.username = newUsername
+                currentUser.bio = newBio
+
+                // Update in registered users as well
+                if (registeredUsers[currentUser.email]) {
+                    registeredUsers[currentUser.email].username = newUsername
+                    registeredUsers[currentUser.email].bio = newBio
+                    registeredUsers[currentUser.email].avatar = currentUser.avatar
+                    saveRegisteredUsers()
+                }
+
+                saveUserData()
+                updateDashboard()
+                updateProfileAvatar()
+
+                setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                showNotification("Profile updated successfully! ✨", "success")
+                hideProfile()
+            }, 1000)
+        }
+
+        function updateAvatar(input) {
+            const file = input.files[0]
+            if (!file) return
+
+            if (file.size > 5 * 1024 * 1024) {
+                showNotification("Image size must be less than 5MB", "error")
+                return
+            }
+
+            const reader = new FileReader()
+            reader.onload = (e) => {
+                currentUser.avatar = e.target.result
+
+                updateUserAvatar()
+                updateProfileAvatar()
+
+                saveUserData()
+                showNotification("Avatar updated successfully! 🖼️", "success")
+            }
+            reader.readAsDataURL(file)
+        }
+
+        function copyUserId() {
+            const userId = document.getElementById("profile-id")
+            userId.select()
+            document.execCommand("copy")
+
+            const button = event.target.closest("button")
+            const originalHTML = button.innerHTML
+            button.innerHTML = `
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                </svg>
+            `
+            button.classList.add("bg-green-500")
+
+            setTimeout(() => {
+                button.innerHTML = originalHTML
+                button.classList.remove("bg-green-500")
+            }, 2000)
+
+            showNotification("Cosmic ID copied to clipboard! 📋", "success")
+        }
+
+        // Enhanced friend management with real user lookup
+        function showAddFriend() {
+            document.getElementById("add-friend-modal").classList.remove("hidden")
+            document.getElementById("add-friend-modal").style.animation = "fadeIn 0.3s ease-out"
+            document.getElementById("friend-identifier").focus()
+        }
+
+        function hideAddFriend() {
+            const modal = document.getElementById("add-friend-modal")
+            modal.style.animation = "fadeOut 0.3s ease-out"
+            setTimeout(() => {
+                modal.classList.add("hidden")
+                document.getElementById("friend-identifier").value = ""
+            }, 300)
+        }
+
+        function handleAddFriend(e) {
+            e.preventDefault()
+
+            const identifier = document.getElementById("friend-identifier").value.trim()
+
+            if (!identifier) {
+                showNotification("Please enter a Cosmic ID", "error")
+                return
+            }
+
+            if (!identifier.startsWith("cosmic_")) {
+                showNotification("Invalid Cosmic ID format. It should start with 'cosmic_'", "error")
+                return
+            }
+
+            // Check if friend already exists
+            const existingFriend = friends.find((f) => f.id === identifier)
+            if (existingFriend) {
+                showNotification("This cosmic explorer is already your friend! 👥", "warning")
+                return
+            }
+
+            // Check if trying to add self
+            if (identifier === currentUser.id) {
+                showNotification("You cannot add yourself as a friend! 🤔", "warning")
+                return
+            }
+
+            setButtonLoading(e.target.querySelector('button[type="submit"]'), true)
+
+            // Look for the user in registered users
+            setTimeout(() => {
+                let foundUser = null
+                for (const email in registeredUsers) {
+                    if (registeredUsers[email].id === identifier) {
+                        foundUser = registeredUsers[email]
+                        break
+                    }
+                }
+
+                if (!foundUser) {
+                    setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                    showNotification("Cosmic ID not found. Make sure your friend has signed up and shared the correct ID! 🔍", "error")
+                    return
+                }
+
+                const newFriend = {
+                    id: foundUser.id,
+                    username: foundUser.username,
+                    email: foundUser.email,
+                    status: Math.random() > 0.5 ? "online" : "offline",
+                    avatar: foundUser.avatar,
+                    addedDate: new Date().toISOString(),
+                    lastSeen: new Date(Date.now() - Math.random() * 86400000).toISOString(),
+                    bio: foundUser.bio || "Fellow cosmic explorer! 🌌",
+                }
+
+                friends.push(newFriend)
+                saveUserData()
+                updateDashboard()
+
+                setButtonLoading(e.target.querySelector('button[type="submit"]'), false)
+                hideAddFriend()
+
+                showNotification(`${newFriend.username} added to your cosmic friends! 🎉`, "success")
+            }, 2000)
+        }
+
+        // Enhanced chat functionality
+        function loadChat(friendId) {
+            const friend = friends.find((f) => f.id === friendId)
+            if (!friend) return
+
+            currentChat = friend
+
+            document.getElementById("chat-friend-name").textContent = friend.username
+            updateChatStatus(friend)
+
+            const chatAvatar = document.getElementById("chat-friend-avatar")
+            if (friend.avatar) {
+                chatAvatar.style.backgroundImage = `url(${friend.avatar})`
+                chatAvatar.style.backgroundSize = "cover"
+                chatAvatar.style.backgroundPosition = "center"
+                chatAvatar.textContent = ""
+            } else {
+                chatAvatar.style.backgroundImage = ""
+                chatAvatar.textContent = friend.username.charAt(0).toUpperCase()
+            }
+
+            loadMessages(friendId)
+            markMessagesAsRead(friendId)
+            document.getElementById("message-input").focus()
+        }
+
+        function updateChatStatus(friend) {
+            const statusText = document.getElementById("chat-friend-status-text")
+            const statusIndicator = document.getElementById("chat-friend-status")
+            const isOnline = friend.status === "online"
+
+            statusText.textContent = isOnline ? "online" : `last seen ${getTimeAgo(new Date(friend.lastSeen))}`
+            statusText.className = `text-sm px-3 py-1 rounded-full font-medium ${isOnline ? "text-green-300 bg-green-500/20 border border-green-500/30" : "text-gray-400 bg-gray-500/20 border border-gray-500/30"}`
+            statusIndicator.className = `absolute -bottom-1 -right-1 w-4 h-4 border-3 border-black rounded-full ${isOnline ? "status-online" : "status-offline"}`
+        }
+
+        function loadMessages(friendId) {
+            const container = document.getElementById("messages-container")
+            const friendMessages = messages[friendId] || []
+
+            if (friendMessages.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-gray-400 py-16">
+                        <div class="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-purple-500/20 to-cyan-500/20 rounded-3xl flex items-center justify-center">
+                            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-semibold mb-2">Start your cosmic conversation</h3>
+                        <p class="text-lg">Send your first message to ${currentChat.username}!</p>
+                    </div>
+                `
+                return
+            }
+
+            container.innerHTML = friendMessages
+                .map((message, index) => {
+                    const isUser = message.sender === "user"
+                    const time = new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+
+                    if (message.type === "image") {
+                        return `
+                            <div class="flex ${isUser ? "justify-end" : "justify-start"} message-bubble" style="animation-delay: ${index * 0.1}s">
+                                <div class="max-w-sm lg:max-w-md">
+                                    <div class="p-3 rounded-2xl ${isUser ? "message-user" : "message-friend"}">
+                                        <img src="${message.image}" alt="Shared image" class="rounded-xl max-w-full h-auto cursor-pointer hover:scale-105 transition-transform" onclick="openImageModal('${message.image}')">
+                                    </div>
+                                    <div class="flex items-center ${isUser ? "justify-end" : "justify-start"} mt-2 space-x-2">
+                                        <p class="text-xs text-gray-400">${time}</p>
+                                        ${isUser && message.read ? '<svg class="w-3 h-3 text-cyan-400" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>' : ""}
+                                    </div>
+                                </div>
+                            </div>
+                        `
+                    } else {
+                        return `
+                            <div class="flex ${isUser ? "justify-end" : "justify-start"} message-bubble" style="animation-delay: ${index * 0.1}s">
+                                <div class="max-w-sm lg:max-md">
+                                    <div class="p-4 rounded-2xl ${isUser ? "message-user text-white" : "message-friend text-white"}">
+                                        <p class="text-sm leading-relaxed">${escapeHtml(message.text)}</p>
+                                    </div>
+                                    <div class="flex items-center ${isUser ? "justify-end" : "justify-start"} mt-2 space-x-2">
+                                        <p class="text-xs text-gray-400">${time}</p>
+                                        ${isUser && message.read ? '<svg class="w-3 h-3 text-cyan-400" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>' : ""}
+                                    </div>
+                                </div>
+                            </div>
+                        `
+                    }
+                })
+                .join("")
+
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight
+            }, 100)
+        }
+
+        function markMessagesAsRead(friendId) {
+            if (messages[friendId]) {
+                messages[friendId].forEach((msg) => {
+                    if (msg.sender === "friend") {
+                        msg.read = true
+                    }
+                })
+                saveUserData()
+                updateDashboard()
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById("message-input")
+            const text = input.value.trim()
+
+            if (!text || !currentChat) return
+
+            const message = {
+                id: Date.now().toString(),
+                text: text,
+                sender: "user",
+                timestamp: new Date().toISOString(),
+                type: "text",
+                read: true,
+            }
+
+            if (!messages[currentChat.id]) {
+                messages[currentChat.id] = []
+            }
+            messages[currentChat.id].push(message)
+
+            input.value = ""
+            loadMessages(currentChat.id)
+            saveUserData()
+
+            setTimeout(() => {
+                simulateFriendResponse()
+            }, 1000 + Math.random() * 2000)
+        }
+
+        function sendImage(input) {
+            const file = input.files[0]
+            if (!file || !currentChat) return
+
+            if (file.size > 10 * 1024 * 1024) {
+                showNotification("Image size must be less than 10MB", "error")
+                return
+            }
+
+            const reader = new FileReader()
+            reader.onload = (e) => {
+                const message = {
+                    id: Date.now().toString(),
+                    image: e.target.result,
+                    sender: "user",
+                    timestamp: new Date().toISOString(),
+                    type: "image",
+                    read: true,
+                }
+
+                if (!messages[currentChat.id]) {
+                    messages[currentChat.id] = []
+                }
+                messages[currentChat.id].push(message)
+
+                loadMessages(currentChat.id)
+                saveUserData()
+
+                setTimeout(() => {
+                    const imageResponses = [
+                        "Wow, amazing photo! 📸✨",
+                        "That's incredible! 🤩",
+                        "Beautiful shot! 📷💫",
+                        "Love this! 😍🌟",
+                        "Thanks for sharing! 🙏✨",
+                    ]
+                    simulateFriendResponse(imageResponses[Math.floor(Math.random() * imageResponses.length)])
+                }, 2000)
+            }
+            reader.readAsDataURL(file)
+
+            input.value = ""
+        }
+
+        function simulateFriendResponse(customText = null) {
+            if (!currentChat) return
+
+            document.getElementById("typing-indicator").classList.remove("hidden")
+
+            setTimeout(() => {
+                document.getElementById("typing-indicator").classList.add("hidden")
+
+                const responses = [
+                    "That's awesome! 🌟",
+                    "I totally agree with you!",
+                    "Haha, you're so funny! 😄",
+                    "Tell me more about that!",
+                    "That sounds amazing! ✨",
+                    "I love exploring the cosmos with you! 🚀",
+                    "Wow, that's incredible!",
+                    "Thanks for sharing that! 💫",
+                    "You always have the best ideas! 🌌",
+                    "That's so cool! 🔥",
+                    "💯",
+                    "I'm excited about this! 🎉",
+                ]
+
+                const responseText = customText || responses[Math.floor(Math.random() * responses.length)]
+
+                const friendMessage = {
+                    id: (Date.now() + 1).toString(),
+                    text: responseText,
+                    sender: "friend",
+                    timestamp: new Date().toISOString(),
+                    type: "text",
+                    read: false,
+                }
+
+                messages[currentChat.id].push(friendMessage)
+                loadMessages(currentChat.id)
+                saveUserData()
+            }, 1500 + Math.random() * 1000)
+        }
+
+        function simulateTypingIndicator() {
+            if (!currentChat) return
+
+            const indicator = document.getElementById("typing-indicator")
+            indicator.classList.remove("hidden")
+
+            setTimeout(() => {
+                indicator.classList.add("hidden")
+            }, 3000)
+        }
+
+        function backToDashboard() {
+            currentChat = null
+            showDashboard()
+        }
+
+        // Enhanced calling functionality with WebRTC
+        function startVoiceCall() {
+            if (!currentChat) return
+
+            showNotification(`Starting voice call with ${currentChat.username}... 📞`, "info")
+            
+            // Show incoming call notification for demo
+            setTimeout(() => {
+                showIncomingCall(currentChat.username, 'voice')
+            }, 2000)
+        }
+
+        function startVideoCall() {
+            if (!currentChat) return
+
+            showNotification(`Initiating video call with ${currentChat.username}... 📹`, "info")
+            
+            // Initialize WebRTC
+            initializeWebRTC()
+            
+            document.getElementById("video-call-overlay").classList.remove("hidden")
+            document.getElementById("video-call-overlay").style.animation = "fadeIn 0.5s ease-out"
+            document.getElementById("remote-video-label").textContent = currentChat.username
+
+            isInCall = true
+            callStartTime = Date.now()
+            startCallTimer()
+
+            navigator.mediaDevices
+                .getUserMedia({
+                    video: { width: 1280, height: 720 },
+                    audio: { echoCancellation: true, noiseSuppression: true },
+                })
+                .then((stream) => {
+                    localStream = stream
+                    document.getElementById("local-video").srcObject = stream
+                    showNotification(`Video call connected with ${currentChat.username} 📹`, "success")
+                })
+                .catch((err) => {
+                    console.error("Error accessing media devices:", err)
+                    showNotification("Could not access camera/microphone. Please check permissions.", "error")
+                    endCall()
+                })
+        }
+
+        function showIncomingCall(callerName, type = 'video') {
+            document.getElementById("caller-name").textContent = callerName
+            document.getElementById("incoming-call").classList.remove("hidden")
+            
+            // Auto-decline after 30 seconds
+            setTimeout(() => {
+                if (!document.getElementById("incoming-call").classList.contains("hidden")) {
+                    declineCall()
+                }
+            }, 30000)
+        }
+
+        function acceptCall() {
+            document.getElementById("incoming-call").classList.add("hidden")
+            startVideoCall()
+        }
+
+        function declineCall() {
+            document.getElementById("incoming-call").classList.add("hidden")
+            showNotification("Call declined", "info")
+        }
+
+        function endCall() {
+            isInCall = false
+
+            if (localStream) {
+                localStream.getTracks().forEach((track) => track.stop())
+                localStream = null
+            }
+
+            if (peerConnection) {
+                peerConnection.close()
+                peerConnection = null
+            }
+
+            if (callTimer) {
+                clearInterval(callTimer)
+                callTimer = null
+            }
+
+            const overlay = document.getElementById("video-call-overlay")
+            overlay.style.animation = "fadeOut 0.5s ease-out"
+            setTimeout(() => {
+                overlay.classList.add("hidden")
+                document.getElementById("call-timer").textContent = "00:00"
+            }, 500)
+
+            showNotification("Call ended 📞", "info")
+        }
+
+        function startCallTimer() {
+            callTimer = setInterval(() => {
+                if (!isInCall) return
+
+                const elapsed = Math.floor((Date.now() - callStartTime) / 1000)
+                const minutes = Math.floor(elapsed / 60).toString().padStart(2, "0")
+                const seconds = (elapsed % 60).toString().padStart(2, "0")
+
+                document.getElementById("call-timer").textContent = `${minutes}:${seconds}`
+            }, 1000)
+        }
+
+        function toggleMute() {
+            if (!localStream) return
+
+            const audioTrack = localStream.getAudioTracks()[0]
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled
+                const muteBtn = document.getElementById("mute-btn")
+
+                if (audioTrack.enabled) {
+                    muteBtn.innerHTML = `
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+                        </svg>
+                    `
+                    muteBtn.className = "bg-purple-500 hover:bg-purple-600 text-white p-4 rounded-2xl transition-all duration-300 hover:scale-110 call-button"
+                    showNotification("Microphone unmuted 🎙️", "info")
+                } else {
+                    muteBtn.innerHTML = `
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
+                        </svg>
+                    `
+                    muteBtn.className = "bg-red-500 hover:bg-red-600 text-white p-4 rounded-2xl transition-all duration-300 hover:scale-110 call-button"
+                    showNotification("Microphone muted 🔇", "info")
+                }
+            }
+        }
+
+        function toggleVideo() {
+            if (!localStream) return
+
+            const videoTrack = localStream.getVideoTracks()[0]
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled
+                const videoBtn = document.getElementById("video-btn")
+
+                if (videoTrack.enabled) {
+                    videoBtn.innerHTML = `
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                    `
+                    videoBtn.className = "bg-purple-500 hover:bg-purple-600 text-white p-4 rounded-2xl transition-all duration-300 hover:scale-110 call-button"
+                    showNotification("Camera enabled 📹", "info")
+                } else {
+                    videoBtn.innerHTML = `
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18.364 5.636M5.636 18.364l12.728-12.728"/>
+                        </svg>
+                    `
+                    videoBtn.className = "bg-red-500 hover:bg-red-600 text-white p-4 rounded-2xl transition-all duration-300 hover:scale-110 call-button"
+                    showNotification("Camera disabled 📷", "info")
+                }
+            }
+        }
+
+        // Initialize WebRTC for real-time communication
+        function initializeWebRTC() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                console.warn("WebRTC not supported in this browser")
+                return
+            }
+
+            // Create RTCPeerConnection
+            const configuration = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+
+            peerConnection = new RTCPeerConnection(configuration)
+
+            // Handle remote stream
+            peerConnection.ontrack = (event) => {
+                remoteStream = event.streams[0]
+                document.getElementById("remote-video").srcObject = remoteStream
+            }
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    // In a real app, send this to the remote peer
+                    console.log('ICE candidate:', event.candidate)
+                }
+            }
+
+            console.log("WebRTC initialized successfully")
+        }
+
+        // Enhanced utility functions
+        function showNotification(message, type = "info") {
+            const notification = document.createElement("div")
+            notification.className = `notification fixed top-6 right-6 z-50 p-6 rounded-2xl shadow-2xl transition-all duration-500 transform translate-x-full max-w-sm`
+
+            const icons = {
+                success: "M5 13l4 4L19 7",
+                error: "M6 18L18 6M6 6l12 12",
+                warning: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z",
+                info: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+            }
+
+            const colors = {
+                success: "bg-green-500/90 text-white border border-green-400",
+                error: "bg-red-500/90 text-white border border-red-400",
+                warning: "bg-yellow-500/90 text-black border border-yellow-400",
+                info: "bg-blue-500/90 text-white border border-blue-400",
+            }
+
+            notification.className += ` ${colors[type]}`
+            notification.innerHTML = `
+                <div class="flex items-center space-x-3">
+                    <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${icons[type]}"/>
+                    </svg>
+                    <p class="font-medium">${message}</p>
+                </div>
+            `
+
+            document.body.appendChild(notification)
+
+            setTimeout(() => {
+                notification.classList.remove("translate-x-full")
+            }, 100)
+
+            setTimeout(() => {
+                notification.classList.add("translate-x-full")
+                setTimeout(() => {
+                    if (document.body.contains(notification)) {
+                        document.body.removeChild(notification)
+                    }
+                }, 500)
+            }, 4000)
+        }
+
+        function setButtonLoading(button, loading) {
+            if (loading) {
+                button.disabled = true
+                button.dataset.originalText = button.innerHTML
+                button.innerHTML = `
+                    <div class="flex items-center justify-center">
+                        <div class="loading-spinner mr-3"></div>
+                        Processing...
+                    </div>
+                `
+            } else {
+                button.disabled = false
+                button.innerHTML = button.dataset.originalText
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div")
+            div.textContent = text
+            return div.innerHTML
+        }
+
+        function openImageModal(imageSrc) {
+            const modal = document.createElement("div")
+            modal.className = "fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            modal.innerHTML = `
+                <div class="relative max-w-4xl max-h-full">
+                    <img src="${imageSrc}" class="max-w-full max-h-full rounded-2xl" alt="Full size image">
+                    <button onclick="this.closest('.fixed').remove()" class="absolute top-4 right-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 transition-colors">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            `
+            document.body.appendChild(modal)
+            modal.style.animation = "fadeIn 0.3s ease-out"
+        }
+
+        // Auto-save user data periodically
+        setInterval(() => {
+            if (currentUser) {
+                saveUserData()
+            }
+        }, 30000)
+    </script>
 </body>
 </html>
